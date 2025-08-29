@@ -1,0 +1,14 @@
+[package]
+name = "rust-hash"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+iced = { version = "0.12", features = ["wgpu", "image", "svg"] }
+sha2 = "0.10"
+anyhow = "1.0"
+rfd = "0.14"
+base64 = "0.22"
+hex = "0.4"
+
+

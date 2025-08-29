@@ -1,0 +1,24 @@
+# Build output
+/target/
+
+# Rust backups
+**/*.rs.bk
+
+# Logs & temp files
+*.log
+*.tmp
+*.bak
+*.old
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE & editor settings
+.idea/
+.vscode/
+.vs/
+*.iml
+
+
