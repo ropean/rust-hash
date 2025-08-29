@@ -254,7 +254,7 @@ fn labeled_value<'a>(label: &str, value: &str, copy_msg: Message, copy_label: &s
     let copy_btn = if value.is_empty() {
         button(text("Copy")).style(theme::Button::Secondary)
     } else {
-        button(text(copy_label)).on_press(copy_msg).style(theme::Button::Secondary).width(Length::Fixed(140.0))
+        button(text(copy_label)).on_press(copy_msg).style(theme::Button::Secondary).width(Length::Fixed(110.0))
     };
 
     row![
