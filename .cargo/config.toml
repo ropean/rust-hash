@@ -1,0 +1,8 @@
+[alias]
+# Build with Windows icon feature enabled
+build-icon = "build --release --features windows-icon"
+
+# Run with Windows icon feature enabled
+run-icon = "run --release --features windows-icon"
+
+
