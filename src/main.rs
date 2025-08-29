@@ -183,7 +183,7 @@ impl Application for App {
         }
     }
 
-    fn view(&self) -> Element<Self::Message> {
+    fn view(&self) -> Element<'_, Self::Message> {
         let title = text("Rust Hash256 🔒").size(28);
 
         let path_input = text_input("Drag a file here or paste path...", &self.path_input)
