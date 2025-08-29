@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
@@ -15,9 +17,10 @@ use sha2::{Digest, Sha256};
 
 fn main() -> iced::Result {
     let mut settings = Settings::default();
-    settings.window.size = Size::new(800.0, 560.0);
+    settings.window.size = Size::new(900.0, 560.0);
     settings.window.resizable = true;
-    settings.window.min_size = Some(Size::new(640.0, 420.0));
+    settings.window.min_size = Some(Size::new(900.0, 420.0));
+    settings.window.position = window::Position::Centered;
     App::run(settings)
 }
 
@@ -78,7 +81,7 @@ impl Application for App {
     }
 
     fn title(&self) -> String {
-        "Rust Hash256".to_string()
+        "Rust Hash256 🔒".to_string()
     }
 
     fn theme(&self) -> Theme {
@@ -184,21 +187,18 @@ impl Application for App {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        let title = text("Rust Hash256 🔒").size(28);
+        let title = text("Rust Hash256").size(28);
 
         let path_input = text_input("Drag a file here or paste path...", &self.path_input)
             .on_input(Message::PathChanged)
+            .on_submit(Message::StartHash)
             .padding(12)
             .size(16)
             .width(Length::Fill);
 
-        let browse_btn = button(text("📁 Browse").size(16)).on_press(Message::BrowsePressed);
+        let browse_btn = button(text("Browse").size(16)).on_press(Message::BrowsePressed);
 
-        let clear_btn = button(text("🧹 Clear").size(16)).on_press(Message::ClearPressed);
-
-        let start_btn = button(if self.is_hashing { text("⏳ Hashing...") } else { text("⚙️ Hash") })
-            .on_press(Message::StartHash)
-            .style(theme::Button::Primary);
+        let clear_btn = button(text("Clear").size(16)).on_press(Message::ClearPressed);
 
         let toggles = row![
             checkbox("Uppercase HEX", self.uppercase).on_toggle(Message::UppercaseToggled),
@@ -207,11 +207,11 @@ impl Application for App {
         .spacing(20)
         .align_items(iced::Alignment::Center);
 
-        let header = row![path_input, browse_btn, clear_btn, start_btn]
+        let header = row![path_input, browse_btn, clear_btn]
             .spacing(10)
             .align_items(iced::Alignment::Center);
 
-        let drag_hint = container(text("Drop a file anywhere in this window to hash ⤵").size(14))
+        let drag_hint = container(text("Drop a file anywhere in this window to hash").size(14))
             .width(Length::Fill)
             .padding(6);
 
@@ -220,13 +220,13 @@ impl Application for App {
                 "SHA-256 (HEX)",
                 &self.hex_output,
                 Message::CopyHex,
-                "📋 Copy HEX",
+                "Copy HEX",
             ),
             labeled_value(
                 "SHA-256 (Base64)",
                 &self.base64_output,
                 Message::CopyBase64,
-                "📋 Copy Base64",
+                "Copy Base64",
             ),
         ]
         .spacing(12);
@@ -247,19 +247,19 @@ impl Application for App {
 
 fn labeled_value<'a>(label: &str, value: &str, copy_msg: Message, copy_label: &str) -> Element<'a, Message> {
     let label_widget = text(label).size(16);
-    let value_widget = text(if value.is_empty() { "—" } else { value })
+    let value_widget = text(if value.is_empty() { "-" } else { value })
         .size(15)
         .width(Length::Fill);
 
     let copy_btn = if value.is_empty() {
-        button(text("📋 Copy")).style(theme::Button::Secondary)
+        button(text("Copy")).style(theme::Button::Secondary)
     } else {
-        button(text(copy_label)).on_press(copy_msg).style(theme::Button::Secondary)
+        button(text(copy_label)).on_press(copy_msg).style(theme::Button::Secondary).width(Length::Fixed(140.0))
     };
 
     row![
         container(label_widget)
-            .width(Length::Fixed(180.0))
+            .width(Length::Fixed(200.0))
             .align_x(Horizontal::Left)
             .align_y(Vertical::Center),
         container(value_widget).padding(10).width(Length::Fill),
@@ -279,20 +279,20 @@ fn meta_info(
 ) -> Element<'static, Message> {
     let mut parts: Vec<Element<'static, Message>> = Vec::new();
     if let Some(p) = path {
-        let s = format!("📄 {}", p.display());
+        let s = format!("{}", p.display());
         parts.push(text(s).size(14).into());
     }
     if let Some(e) = error {
-        parts.push(text(format!("❗ {}", e)).style(theme::Text::Color([1.0, 0.5, 0.5].into())).into());
+        parts.push(text(format!("{}", e)).style(theme::Text::Color([1.0, 0.5, 0.5].into())).into());
     } else {
         if let (Some(el), Some(b)) = (elapsed, bytes) {
             let secs = el.as_secs_f64();
             let speed = if secs > 0.0 { (*b as f64) / secs } else { 0.0 };
             let speed_human = human_bytes(speed);
             let b_human = human_bytes(*b as f64);
-            parts.push(text(format!("⏱️ {} • {} • {}/s", human_duration(el), b_human, speed_human)).size(14).into());
+            parts.push(text(format!("{} • {} • {}/s", human_duration(el), b_human, speed_human)).size(14).into());
         } else if is_hashing {
-            parts.push(text("⏳ Hashing...").size(14).into());
+            parts.push(text("Hashing...").size(14).into());
         }
     }
 
