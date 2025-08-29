@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -21,6 +22,11 @@ fn main() -> iced::Result {
     settings.window.resizable = true;
     settings.window.min_size = Some(Size::new(900.0, 420.0));
     settings.window.position = window::Position::Centered;
+    if let Ok(icon_path) = std::env::var("APP_ICON") {
+        if let Ok(icon) = window::icon::from_file(Path::new(&icon_path)) {
+            settings.window.icon = Some(icon);
+        } 
+    } 
     App::run(settings)
 }
 

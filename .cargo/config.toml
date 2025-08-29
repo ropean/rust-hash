@@ -1,8 +1,13 @@
+[env]
+# Windows icon path used by build.rs when the `windows-icon` feature is enabled
+APP_ICON = 'assets\13310651.ico'
+
+[features]
+windows-icon = ["iced/windows-icon"]
+
 [alias]
 # Build with Windows icon feature enabled
 build-icon = "build --release --features windows-icon"
 
 # Run with Windows icon feature enabled
 run-icon = "run --release --features windows-icon"
-
-
