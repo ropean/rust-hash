@@ -5,6 +5,9 @@ use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::path::Path;
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -13,6 +16,7 @@ use iced::executor;
 use iced::theme;
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{clipboard, event, window, Application, Command, Element, Length, Settings, Subscription, Theme, Size};
+// time subscription for periodic UI updates
 use rfd::FileDialog;
 use sha2::{Digest, Sha256};
 
@@ -22,11 +26,27 @@ fn main() -> iced::Result {
     settings.window.resizable = true;
     settings.window.min_size = Some(Size::new(900.0, 420.0));
     settings.window.position = window::Position::Centered;
-    if let Ok(icon_path) = std::env::var("APP_ICON") {
-        if let Ok(icon) = window::icon::from_file(Path::new(&icon_path)) {
-            settings.window.icon = Some(icon);
-        } 
-    } 
+    // Try to set window icon from several locations for robustness
+    if settings.window.icon.is_none() {
+        if let Ok(icon_path) = std::env::var("APP_ICON").or_else(|_| std::env::var("ICON")) {
+            if let Ok(icon) = window::icon::from_file(Path::new(&icon_path)) {
+                settings.window.icon = Some(icon);
+            }
+        }
+    }
+    if settings.window.icon.is_none() {
+        // Try relative paths
+        let candidates = [
+            Path::new("assets/app.ico").to_path_buf(),
+            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("assets/app.ico"))).unwrap_or_else(|| PathBuf::from("assets/app.ico")),
+        ];
+        for p in candidates {
+            if let Ok(icon) = window::icon::from_file(&p) {
+                settings.window.icon = Some(icon);
+                break;
+            }
+        }
+    }
     App::run(settings)
 }
 
@@ -35,13 +55,14 @@ enum Message {
     PathChanged(String),
     BrowsePressed,
     ClearPressed,
+    CancelPressed,
     CopyHex,
     CopyBase64,
     UppercaseToggled(bool),
     AutoHashToggled(bool),
     DroppedFile(PathBuf),
     StartHash,
-    HashFinished { token: u64, result: std::result::Result<HashResult, String> },
+    Tick,
     Ignored,
 }
 
@@ -70,6 +91,14 @@ struct App {
     last_elapsed: Option<Duration>,
     last_bytes: Option<u64>,
     last_path: Option<PathBuf>,
+    prev_path_before_hash: Option<String>,
+    // Progress
+    progress_total: Option<u64>,
+    progress_processed: u64,
+    progress_counter: Option<Arc<AtomicU64>>,
+    cancel_flag: Option<Arc<AtomicBool>>,
+    worker_rx: Option<Receiver<(u64, std::result::Result<HashResult, String>)>>,
+    worker_token: Option<u64>,
     // Concurrency token to ignore late results
     token: u64,
 }
@@ -87,7 +116,16 @@ impl Application for App {
     }
 
     fn title(&self) -> String {
-        "Rust Hash256 🔒".to_string()
+        if self.is_hashing {
+            if let Some(total) = self.progress_total {
+                if total > 0 {
+                    let pct = ((self.progress_processed as f64 / total as f64) * 100.0).clamp(0.0, 100.0);
+                    return format!("Rust Hash256 - {:.0}% ", pct);
+                }
+            }
+            return "Rust Hash256 - hashing... ".to_string();
+        }
+        "Rust Hash256 ".to_string()
     }
 
     fn theme(&self) -> Theme {
@@ -95,10 +133,12 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        event::listen().map(|e| match e {
+        let file_drop = event::listen().map(|e| match e {
             event::Event::Window(_, window::Event::FileDropped(path)) => Message::DroppedFile(path),
             _ => Message::Ignored,
-        })
+        });
+        let tick = iced::time::every(Duration::from_millis(100)).map(|_| Message::Tick);
+        Subscription::batch(vec![file_drop, tick])
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
@@ -107,16 +147,38 @@ impl Application for App {
                 self.path_input = value;
                 self.error = None;
                 if self.auto_hash && !self.path_input.trim().is_empty() && !self.is_hashing {
-                    return Command::perform(start_hash(self.next_token(), self.path_input.clone()), |r| r);
+                    self.start_hashing(self.path_input.clone());
+                    return Command::none();
                 }
                 Command::none()
             }
             Message::BrowsePressed => {
-                if let Some(path) = FileDialog::new().pick_file() {
+                let mut dialog = FileDialog::new();
+                // Try to start from previous/current path when available
+                if !self.path_input.trim().is_empty() {
+                    let p = PathBuf::from(&self.path_input);
+                    if p.is_dir() {
+                        dialog = dialog.set_directory(&p);
+                    } else if let Some(parent) = p.parent() {
+                        if parent.is_dir() {
+                            dialog = dialog.set_directory(parent);
+                        }
+                    }
+                } else if let Some(p) = &self.last_path {
+                    if p.is_dir() {
+                        dialog = dialog.set_directory(p);
+                    } else if let Some(parent) = p.parent() {
+                        if parent.is_dir() {
+                            dialog = dialog.set_directory(parent);
+                        }
+                    }
+                }
+                if let Some(path) = dialog.pick_file() {
                     self.path_input = path.to_string_lossy().to_string();
                     self.error = None;
                     if self.auto_hash {
-                        return Command::perform(start_hash(self.next_token(), self.path_input.clone()), |r| r);
+                        self.start_hashing(self.path_input.clone());
+                        return Command::none();
                     }
                 }
                 Command::none()
@@ -129,6 +191,24 @@ impl Application for App {
                 self.last_elapsed = None;
                 self.last_bytes = None;
                 self.last_path = None;
+                self.progress_total = None;
+                self.progress_processed = 0;
+                Command::none()
+            }
+            Message::CancelPressed => {
+                if let Some(flag) = &self.cancel_flag {
+                    flag.store(true, Ordering::Relaxed);
+                }
+                // Try to restore previous path when possible
+                if let Some(prev) = self.prev_path_before_hash.take() {
+                    self.path_input = prev;
+                } else if let Some(p) = &self.last_path {
+                    self.path_input = p.to_string_lossy().to_string();
+                }
+                self.is_hashing = false;
+                self.progress_total = None;
+                self.progress_processed = 0;
+                self.worker_rx = None;
                 Command::none()
             }
             Message::CopyHex => clipboard::write(self.hex_output.clone()),
@@ -152,38 +232,58 @@ impl Application for App {
                 self.path_input = path.to_string_lossy().to_string();
                 self.error = None;
                 if self.auto_hash {
-                    return Command::perform(start_hash(self.next_token(), self.path_input.clone()), |r| r);
+                    self.start_hashing(self.path_input.clone());
+                    return Command::none();
                 }
                 Command::none()
             }
             Message::StartHash => {
                 if !self.path_input.trim().is_empty() && !self.is_hashing {
-                    return Command::perform(start_hash(self.next_token(), self.path_input.clone()), |r| r);
+                    self.start_hashing(self.path_input.clone());
+                    return Command::none();
                 }
                 Command::none()
             }
-            Message::HashFinished { token, result } => {
-                if token != self.token {
-                    // Stale result; ignore
-                    return Command::none();
-                }
-                self.is_hashing = false;
-                match result {
-                    Ok(hr) => {
-                        self.error = None;
-                        self.hex_output = if self.uppercase { hr.hex.to_uppercase() } else { hr.hex };
-                        self.base64_output = hr.base64;
-                        self.last_elapsed = Some(hr.elapsed);
-                        self.last_bytes = Some(hr.bytes);
-                        self.last_path = hr.path;
+            Message::Tick => {
+                if self.is_hashing {
+                    if let Some(counter) = &self.progress_counter {
+                        self.progress_processed = counter.load(Ordering::Relaxed);
                     }
-                    Err(e) => {
-                        self.error = Some(e);
-                        self.hex_output.clear();
-                        self.base64_output.clear();
-                        self.last_elapsed = None;
-                        self.last_bytes = None;
-                        self.last_path = None;
+                    if let Some(rx) = &self.worker_rx {
+                        if let Ok((token, result)) = rx.try_recv() {
+                            if token == self.token {
+                                self.is_hashing = false;
+                                match result {
+                                    Ok(hr) => {
+                                        self.error = None;
+                                        self.hex_output = if self.uppercase { hr.hex.to_uppercase() } else { hr.hex };
+                                        self.base64_output = hr.base64;
+                                        self.last_elapsed = Some(hr.elapsed);
+                                        self.last_bytes = Some(hr.bytes);
+                                        self.last_path = hr.path;
+                                    }
+                                    Err(e) => {
+                                        if e == "CANCELLED" {
+                                            // Already restored path in CancelPressed
+                                            self.error = None;
+                                        } else {
+                                            self.error = Some(e);
+                                            self.hex_output.clear();
+                                            self.base64_output.clear();
+                                            self.last_elapsed = None;
+                                            self.last_bytes = None;
+                                            self.last_path = None;
+                                        }
+                                    }
+                                }
+                                self.progress_total = None;
+                                self.progress_processed = 0;
+                                self.progress_counter = None;
+                                self.cancel_flag = None;
+                                self.worker_rx = None;
+                                self.worker_token = None;
+                            }
+                        }
                     }
                 }
                 Command::none()
@@ -202,9 +302,23 @@ impl Application for App {
             .size(16)
             .width(Length::Fill);
 
-        let browse_btn = button(text("Browse").size(16)).on_press(Message::BrowsePressed);
+        let browse_btn = if self.is_hashing {
+            button(text("Browse").size(16)).style(theme::Button::Secondary)
+        } else {
+            button(text("Browse").size(16)).on_press(Message::BrowsePressed)
+        };
 
-        let clear_btn = button(text("Clear").size(16)).on_press(Message::ClearPressed);
+        let clear_btn = if self.is_hashing {
+            button(text("Clear").size(16)).style(theme::Button::Secondary)
+        } else {
+            button(text("Clear").size(16)).on_press(Message::ClearPressed)
+        };
+
+        let cancel_btn: Option<Element<'_, Message>> = if self.is_hashing {
+            Some(button(text("Cancel").size(16)).on_press(Message::CancelPressed).style(theme::Button::Primary).into())
+        } else {
+            None
+        };
 
         let toggles = row![
             checkbox("Uppercase HEX", self.uppercase).on_toggle(Message::UppercaseToggled),
@@ -213,9 +327,15 @@ impl Application for App {
         .spacing(20)
         .align_items(iced::Alignment::Center);
 
-        let header = row![path_input, browse_btn, clear_btn]
-            .spacing(10)
-            .align_items(iced::Alignment::Center);
+        let header = if let Some(c) = cancel_btn {
+            row![path_input, browse_btn, clear_btn, c]
+                .spacing(10)
+                .align_items(iced::Alignment::Center)
+        } else {
+            row![path_input, browse_btn, clear_btn]
+                .spacing(10)
+                .align_items(iced::Alignment::Center)
+        };
 
         let drag_hint = container(text("Drop a file anywhere in this window to hash").size(14))
             .width(Length::Fill)
@@ -227,12 +347,14 @@ impl Application for App {
                 &self.hex_output,
                 Message::CopyHex,
                 "Copy HEX",
+                self.is_hashing,
             ),
             labeled_value(
                 "SHA-256 (Base64)",
                 &self.base64_output,
                 Message::CopyBase64,
                 "Copy Base64",
+                self.is_hashing,
             ),
         ]
         .spacing(12);
@@ -251,13 +373,13 @@ impl Application for App {
     }
 }
 
-fn labeled_value<'a>(label: &str, value: &str, copy_msg: Message, copy_label: &str) -> Element<'a, Message> {
+fn labeled_value<'a>(label: &str, value: &str, copy_msg: Message, copy_label: &str, disabled: bool) -> Element<'a, Message> {
     let label_widget = text(label).size(16);
     let value_widget = text(if value.is_empty() { "-" } else { value })
         .size(15)
         .width(Length::Fill);
 
-    let copy_btn = if value.is_empty() {
+    let copy_btn = if value.is_empty() || disabled {
         button(text("Copy")).style(theme::Button::Secondary)
     } else {
         button(text(copy_label)).on_press(copy_msg).style(theme::Button::Secondary).width(Length::Fixed(110.0))
@@ -332,38 +454,7 @@ fn human_bytes(b: f64) -> String {
     }
 }
 
-fn start_hash(token: u64, path_str: String) -> impl std::future::Future<Output = Message> {
-    async move {
-        let started = Instant::now();
-        let res = compute_sha256_file(&path_str)
-            .map(|(hex, b64, bytes, path)| HashResult { hex, base64: b64, elapsed: started.elapsed(), bytes, path })
-            .map_err(|e| format!("{}", e));
-        Message::HashFinished { token, result: res }
-    }
-}
-
-fn compute_sha256_file(path_str: &str) -> Result<(String, String, u64, Option<PathBuf>)> {
-    let path = PathBuf::from(path_str);
-    let file = File::open(&path).with_context(|| format!("Failed to open file: {}", path_str))?;
-    let metadata = file.metadata().ok();
-    let mut reader = BufReader::with_capacity(1024 * 1024, file); // 1 MiB buffer
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 1024 * 1024];
-    let mut total: u64 = 0;
-    loop {
-        let n = reader.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-        total += n as u64;
-    }
-    let digest = hasher.finalize();
-    let bytes = digest.as_slice();
-    let hex = hex::encode(bytes);
-    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok((hex, b64, metadata.map(|m| m.len()).unwrap_or(total), Some(path)))
-}
+// old async hash and non-progress variant removed (no longer used)
 
 impl App {
     fn next_token(&mut self) -> u64 {
@@ -373,6 +464,58 @@ impl App {
         self.token = self.token.wrapping_add(1);
         self.token
     }
+
+    fn start_hashing(&mut self, path: String) {
+        let token = self.next_token();
+        self.prev_path_before_hash = Some(self.path_input.clone());
+        let (tx, rx): (Sender<(u64, std::result::Result<HashResult, String>)>, Receiver<_>) = mpsc::channel();
+        let progress = Arc::new(AtomicU64::new(0));
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        // Determine total size if possible (for progress)
+        let total = std::fs::metadata(&path).ok().map(|m| m.len());
+        self.progress_total = total;
+        self.progress_processed = 0;
+        self.progress_counter = Some(progress.clone());
+        self.cancel_flag = Some(cancel.clone());
+        self.worker_rx = Some(rx);
+        self.worker_token = Some(token);
+
+        thread::spawn(move || {
+            let started = Instant::now();
+            let result: std::result::Result<HashResult, String> = compute_sha256_file_progress(&path, progress, cancel)
+                .map(|(hex, b64, bytes, path)| HashResult { hex, base64: b64, elapsed: started.elapsed(), bytes, path })
+                .map_err(|e| format!("{}", e));
+            let _ = tx.send((token, result));
+        });
+    }
+}
+
+fn compute_sha256_file_progress(path_str: &str, progress: Arc<AtomicU64>, cancel: Arc<AtomicBool>) -> Result<(String, String, u64, Option<PathBuf>)> {
+    let path = PathBuf::from(path_str);
+    let file = File::open(&path).with_context(|| format!("Failed to open file: {}", path_str))?;
+    let metadata = file.metadata().ok();
+    let mut reader = BufReader::with_capacity(1024 * 1024, file); // 1 MiB buffer
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(anyhow::anyhow!("CANCELLED"));
+        }
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+        total += n as u64;
+        progress.store(total, Ordering::Relaxed);
+    }
+    let digest = hasher.finalize();
+    let bytes = digest.as_slice();
+    let hex = hex::encode(bytes);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok((hex, b64, metadata.map(|m| m.len()).unwrap_or(total), Some(path)))
 }
 
 

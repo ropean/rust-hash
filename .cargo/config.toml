@@ -1,6 +1,6 @@
 [env]
 # Windows icon path used by build.rs when the `windows-icon` feature is enabled
-APP_ICON = 'assets\13310651.ico'
+APP_ICON = 'assets\app.ico'
 
 [features]
 windows-icon = ["iced/windows-icon"]
