@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2025-08-31
+
+### Added
+
+- Progress percentage shown in window title while hashing.
+- Cancel button to stop hashing; restores previous path when possible.
+- Robust window icon loading with embedded fallback.
+- GitHub Actions release workflow (tag-based) that builds Windows binary and compresses it with UPX.
+- `build-icon.cmd` script to build with icon and compress with UPX locally.
+- `AI_PROMPT.md` documenting project structure and requirements.
+
+### Changed
+
+- Disable Browse/Clear/Copy buttons while hashing.
+- Browse dialog opens in last-used directory when available.
+- Internal refactor: background hashing thread with progress/cancel tracking and periodic UI updates.
+
+### Fixed
+
+- Title icon not displaying in some environments (added multiple fallbacks).
+- Build warnings from unused code and message variants.
+
+[0.2.0]: https://github.com/your-org/rust-hash/releases/tag/v0.2.0
+
 ## [0.1.0] - 2025-08-29
 
 ### Added
