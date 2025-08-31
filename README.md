@@ -74,7 +74,7 @@ Notes
 Windows build script with UPX
 
 ```bat
-build-icon.cmd
+scripts\build-icon.cmd
 ```
 
 Notes:
@@ -97,6 +97,12 @@ Icon loading order
 1. `APP_ICON` or `ICON` environment variable path
 2. `assets/app.ico` (working directory or exe-relative)
 3. Embedded `assets/app.ico` fallback written to a temp file and loaded
+
+Clean
+
+```bat
+scripts\clean.cmd
+```
 
 Release
 
