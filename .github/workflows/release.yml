@@ -18,6 +18,8 @@ jobs:
           toolchain: stable
 
       - name: Build (release)
+        env:
+          APP_VERSION: ${{ github.ref_name }}
         run: cargo build --release --features windows-icon
 
       - name: Install UPX (Chocolatey)

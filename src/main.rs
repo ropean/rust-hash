@@ -103,12 +103,12 @@ impl Application for App {
             if let Some(total) = self.progress_total {
                 if total > 0 {
                     let pct = ((self.progress_processed as f64 / total as f64) * 100.0).clamp(0.0, 100.0);
-                    return format!("Rust Hash256 - {:.0}% ", pct);
+                    return format!("Rust Hash256 v{} - {:.0}% ", app_version(), pct);
                 }
             }
-            return "Rust Hash256 - hashing... ".to_string();
+            return format!("Rust Hash256 v{} - hashing... ", app_version());
         }
-        "Rust Hash256 ".to_string()
+        format!("Rust Hash256 v{} ", app_version())
     }
 
     fn theme(&self) -> Theme {
@@ -539,6 +539,14 @@ fn load_embedded_icon() -> Option<window::Icon> {
         }
     }
     None
+}
+
+fn app_version() -> &'static str {
+    // Prefer runtime env APP_VERSION injected by CI; fallback to Cargo package version
+    static VERSION: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
+        std::env::var("APP_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
+    });
+    &VERSION
 }
 
 
