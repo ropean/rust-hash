@@ -26,27 +26,10 @@ fn main() -> iced::Result {
     settings.window.resizable = true;
     settings.window.min_size = Some(Size::new(900.0, 420.0));
     settings.window.position = window::Position::Centered;
-    // Try to set window icon from several locations for robustness
-    if settings.window.icon.is_none() {
-        if let Ok(icon_path) = std::env::var("APP_ICON").or_else(|_| std::env::var("ICON")) {
-            if let Ok(icon) = window::icon::from_file(Path::new(&icon_path)) {
-                settings.window.icon = Some(icon);
-            }
-        }
-    }
-    if settings.window.icon.is_none() {
-        // Try relative paths
-        let candidates = [
-            Path::new("assets/app.ico").to_path_buf(),
-            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("assets/app.ico"))).unwrap_or_else(|| PathBuf::from("assets/app.ico")),
-        ];
-        for p in candidates {
-            if let Ok(icon) = window::icon::from_file(&p) {
-                settings.window.icon = Some(icon);
-                break;
-            }
-        }
-    }
+    // Try to set window icon from env/paths, then embedded ICO fallback
+    settings.window.icon = try_load_icon_from_env()
+        .or_else(|| try_load_icon_from_paths())
+        .or_else(|| load_embedded_icon());
     App::run(settings)
 }
 
@@ -516,6 +499,43 @@ fn compute_sha256_file_progress(path_str: &str, progress: Arc<AtomicU64>, cancel
     let hex = hex::encode(bytes);
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     Ok((hex, b64, metadata.map(|m| m.len()).unwrap_or(total), Some(path)))
+}
+
+fn try_load_icon_from_env() -> Option<window::Icon> {
+    if let Ok(icon_path) = std::env::var("APP_ICON").or_else(|_| std::env::var("ICON")) {
+        if let Ok(icon) = window::icon::from_file(Path::new(&icon_path)) {
+            return Some(icon);
+        }
+    }
+    None
+}
+
+fn try_load_icon_from_paths() -> Option<window::Icon> {
+    let candidates = [
+        Path::new("assets/app.ico").to_path_buf(),
+        std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("assets/app.ico"))).unwrap_or_else(|| PathBuf::from("assets/app.ico")),
+    ];
+    for p in candidates {
+        if let Ok(icon) = window::icon::from_file(&p) {
+            return Some(icon);
+        }
+    }
+    None
+}
+
+fn load_embedded_icon() -> Option<window::Icon> {
+    // Fallback: embed ICO at compile-time and load it via a temp file
+    const EMBEDDED_ICO: &[u8] = include_bytes!("../assets/app.ico");
+    if EMBEDDED_ICO.is_empty() {
+        return None;
+    }
+    let temp_path = std::env::temp_dir().join("rust-hash-app.ico");
+    if std::fs::write(&temp_path, EMBEDDED_ICO).is_ok() {
+        if let Ok(icon) = window::icon::from_file(&temp_path) {
+            return Some(icon);
+        }
+    }
+    None
 }
 
 
