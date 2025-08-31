@@ -127,10 +127,11 @@ impl Application for App {
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
             Message::PathChanged(value) => {
+                let old_path = self.path_input.clone();
                 self.path_input = value;
                 self.error = None;
                 if self.auto_hash && !self.path_input.trim().is_empty() && !self.is_hashing {
-                    self.start_hashing(self.path_input.clone());
+                    self.start_hashing(self.path_input.clone(), Some(old_path));
                     return Command::none();
                 }
                 Command::none()
@@ -157,10 +158,11 @@ impl Application for App {
                     }
                 }
                 if let Some(path) = dialog.pick_file() {
+                    let old_path = self.path_input.clone();
                     self.path_input = path.to_string_lossy().to_string();
                     self.error = None;
                     if self.auto_hash {
-                        self.start_hashing(self.path_input.clone());
+                        self.start_hashing(self.path_input.clone(), Some(old_path));
                         return Command::none();
                     }
                 }
@@ -212,17 +214,18 @@ impl Application for App {
                 Command::none()
             }
             Message::DroppedFile(path) => {
+                let old_path = self.path_input.clone();
                 self.path_input = path.to_string_lossy().to_string();
                 self.error = None;
                 if self.auto_hash {
-                    self.start_hashing(self.path_input.clone());
+                    self.start_hashing(self.path_input.clone(), Some(old_path));
                     return Command::none();
                 }
                 Command::none()
             }
             Message::StartHash => {
                 if !self.path_input.trim().is_empty() && !self.is_hashing {
-                    self.start_hashing(self.path_input.clone());
+                    self.start_hashing(self.path_input.clone(), None);
                     return Command::none();
                 }
                 Command::none()
@@ -448,9 +451,9 @@ impl App {
         self.token
     }
 
-    fn start_hashing(&mut self, path: String) {
+    fn start_hashing(&mut self, path: String, prev: Option<String>) {
         let token = self.next_token();
-        self.prev_path_before_hash = Some(self.path_input.clone());
+        self.prev_path_before_hash = prev.or_else(|| Some(self.path_input.clone()));
         let (tx, rx): (Sender<(u64, std::result::Result<HashResult, String>)>, Receiver<_>) = mpsc::channel();
         let progress = Arc::new(AtomicU64::new(0));
         let cancel = Arc::new(AtomicBool::new(false));
