@@ -417,20 +417,33 @@ fn meta_info(
 }
 
 fn human_duration(d: Duration) -> String {
-    let ms = d.as_millis();
-    if ms < 1000 {
-        format!("{} ms", ms)
-    } else {
-        format!("{:.2} s", (ms as f64) / 1000.0)
+    let ms_total = d.as_millis() as f64;
+    if ms_total < 1000.0 {
+        return format!("{} ms", ms_total as u128);
     }
+    let s_total = d.as_secs_f64();
+    if s_total < 60.0 {
+        return format!("{:.2} s", s_total);
+    }
+    let m_total = s_total / 60.0;
+    if m_total < 60.0 {
+        return format!("{:.2} min", m_total);
+    }
+    let h_total = m_total / 60.0;
+    if h_total < 24.0 {
+        return format!("{:.2} h", h_total);
+    }
+    let d_total = h_total / 24.0;
+    format!("{:.2} d", d_total)
 }
 
 fn human_bytes(b: f64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut val = b;
+    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
+    let base = 1000.0;
+    let mut val = if b < 0.0 { 0.0 } else { b };
     let mut idx = 0;
-    while val >= 1024.0 && idx < UNITS.len() - 1 {
-        val /= 1024.0;
+    while val >= base && idx < UNITS.len() - 1 {
+        val /= base;
         idx += 1;
     }
     if idx == 0 {
