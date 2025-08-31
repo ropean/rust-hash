@@ -71,5 +71,40 @@ Notes
 - Base64 encodes the raw SHA-256 digest; HEX casing is configurable.
 - Throughput display is approximate (uses file size and elapsed).
 
+Windows build script with UPX
+
+```bat
+build-icon.cmd
+```
+
+Notes:
+
+- The script builds with `--features windows-icon` and compresses `target\release\rust-hash.exe` using UPX if present in PATH.
+- Get UPX from `https://github.com/upx/upx/releases` and add it to PATH to enable compression locally.
+
+Install UPX via a package manager (Windows)
+
+```powershell
+# Chocolatey (admin PowerShell)
+choco install upx -y
+
+# or Scoop
+scoop install upx
+```
+
+Icon loading order
+
+1. `APP_ICON` or `ICON` environment variable path
+2. `assets/app.ico` (working directory or exe-relative)
+3. Embedded `assets/app.ico` fallback written to a temp file and loaded
+
+Release
+
+- Tag push like `v0.1.0` triggers GitHub Actions to build the Windows binary with icon and compress it using UPX (installed via Chocolatey) before attaching to the release.
+
+AI Prompt
+
+- See `AI_PROMPT.md` for a structured prompt describing the project and architecture.
+
 License
 MIT
