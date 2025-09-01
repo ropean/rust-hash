@@ -20,6 +20,8 @@ use iced::{clipboard, event, window, Application, Command, Element, Length, Sett
 use rfd::FileDialog;
 use sha2::{Digest, Sha256};
 
+const BUFFER_SIZE: usize = 2 * 1024 * 1024; // 2 MB buffer
+
 fn main() -> iced::Result {
     let mut settings = Settings::default();
     settings.window.size = Size::new(900.0, 560.0);
@@ -494,9 +496,9 @@ fn compute_sha256_file_progress(path_str: &str, progress: Arc<AtomicU64>, cancel
     let path = PathBuf::from(path_str);
     let file = File::open(&path).with_context(|| format!("Failed to open file: {}", path_str))?;
     let metadata = file.metadata().ok();
-    let mut reader = BufReader::with_capacity(1024 * 1024, file); // 1 MiB buffer
+    let mut reader = BufReader::with_capacity(BUFFER_SIZE, file); // 2 MB buffer
     let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 1024 * 1024];
+    let mut buffer = vec![0u8; BUFFER_SIZE];
     let mut total: u64 = 0;
     loop {
         if cancel.load(Ordering::Relaxed) {
