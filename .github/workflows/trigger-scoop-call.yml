@@ -1,0 +1,33 @@
+name: Update Scoop Bucket
+
+on:
+  workflow_run:
+    workflows: ['Build and Release']
+    types:
+      - completed
+
+jobs:
+  update-scoop:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    uses: ropean/scoop-ropean/.github/workflows/update-scoop-call.yml@main
+    with:
+      tag: ${{ github.event.workflow_run.head_branch }}
+
+      app_name: 'rust-hash'
+      exe_name: 'rust-hash.exe'
+
+      source_repo: ${{ github.repository }}
+
+      description: 'File hashing utility for Windows'
+      homepage: 'https://github.com/ropean/rust-hash/'
+      license_identifier: 'MIT'
+      license_url: 'https://github.com/ropean/rust-hash/blob/main/LICENSE'
+
+      shortcut_name: 'Rust Hash'
+      shortcut_description: 'File hashing utility'
+
+      notes: 'Rust Hash computes cryptographic hashes of files.'
+
+    secrets:
+      source_repo_token: ${{ secrets.GITHUB_TOKEN }}
+      deploy_key: ${{ secrets.SCOOP_ROPEAN_DEPLOY_KEY }}
